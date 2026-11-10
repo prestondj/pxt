@@ -813,7 +813,8 @@ namespace pxsim {
 
         dead = false;
         running = false;
-        yielding: boolean = false;
+        yielding: boolean = true;
+        hasResume: () => boolean;
         idleTimer: any = undefined;
         recording = false;
         recordingTimer: any = 0;
@@ -1107,6 +1108,11 @@ namespace pxsim {
 
         kill() {
             this.dead = true
+            // DELETE BEFORE PR
+            if (typeof window !== "undefined" && (window as any).__cpIndicatorTimer) {
+                clearInterval((window as any).__cpIndicatorTimer);
+                (window as any).__cpIndicatorTimer = undefined;
+            }
             // TODO fix this
             this.stopRecording();
             this.stopIdle();
@@ -1650,6 +1656,7 @@ namespace pxsim {
                 currResume = null
                 return r
             }
+            this.hasResume = () => !!currResume;
             this.setupTop = setupTop
             this.handleDebuggerMsg = handleDebuggerMsg
             this.entry = entryPoint
@@ -1662,6 +1669,7 @@ namespace pxsim {
             runtime = this;
 
             initCurrentRuntime(msg);
+            this.setupCheckpointIndicator();
         }
 
         public setupPerfCounters(names: string[]) {
@@ -1831,23 +1839,37 @@ namespace pxsim {
             }, 66) as any
         }
 
+        /**
+         * Determines whether the simulator is currently resting at a deterministic safe point[cite: 2, 4].
+         */
         public canCheckpoint(): boolean {
-            // firstly, the simulator must be initialized and active
-            if (this.dead || !this.running){
+            // 1. Runtime must not be destroyed or terminated[cite: 4]
+            if (this.dead) {
                 return false;
             }
 
-            // secondly, cannoy checkpoint while evaluating synchronous steps inside the loop
-            // new attribute added to runtime, tracked inside of loop()
-            if (this.yielding === false){
+            // 2. Reject if the synchronous evaluation loop is actively executing instructions[cite: 4]
+            if (this.yielding === false) {
                 return false;
             }
 
-            // thirdly, we inspect every active / scheduled stack frame across runtime
-            // we do this using isFrameChainSafe
+            // 3. Reject if execution lock is held OR callbacks are queued
+            if (this.loopLock != null) {
+                return false;
+            }
+            if (this.loopLockWaitList && this.loopLockWaitList.length > 0) {
+                return false;
+            }
+
+            // 4. Reject if execution is paused inside an unmanaged native JS callback[cite: 2]
+            if (this.hasResume && this.hasResume()) {
+                return false;
+            }
+
+            // 5. Inspect every active and scheduled stack frame continuation[cite: 2, 4]
             const threads = this.getThreads();
-            for (const topFrame of threads){
-                if (!this.isFrameChainSafe(topFrame)){
+            for (const topFrame of threads) {
+                if (!this.isFrameChainSafe(topFrame)) {
                     return false;
                 }
             }
@@ -1855,25 +1877,36 @@ namespace pxsim {
             return true;
         }
 
+        /**
+         * Validates that every stack frame down the continuation chain is a pure simulator-managed state[cite: 2, 4].
+         */
         private isFrameChainSafe(topFrame: StackFrame): boolean {
             let frame: StackFrame | null = topFrame;
 
-            while(frame){
-                // must have a valid, non-negative pc
-                if(typeof frame.pc !== "number" || frame.pc < 0){
+            while (frame) {
+                // Must have a valid, non-negative program counter[cite: 2, 4]
+                if (typeof frame.pc !== "number" || frame.pc < 0) {
                     return false;
                 }
 
-                // function reference must have a resolvable identifier (fnId // symbol name)
+                // Function must be a valid executable function[cite: 2, 4]
                 const fn = frame.fn as any;
-                if (!fn || (typeof fn.fnId !== "number" && typeof fn.symbol !== "string")){
+                if (!fn || typeof fn !== "function") {
                     return false;
                 }
 
-                // validate entire try/catch heirarchy (if present)
+                // If compiler symbol identifiers are present, ensure they match expected types[cite: 2, 4]
+                if (fn.fnId !== undefined && typeof fn.fnId !== "number") {
+                    return false;
+                }
+                if (fn.symbol !== undefined && typeof fn.symbol !== "string") {
+                    return false;
+                }
+
+                // Validate all exception handlers in the try/catch hierarchy[cite: 2, 4]
                 let tf: any = frame.tryFrame;
-                while (tf){
-                    if(typeof tf.handlerPC !== "number" || tf.handlerPC < 0){
+                while (tf) {
+                    if (typeof tf.handlerPC !== "number" || tf.handlerPC < 0) {
                         return false;
                     }
                     tf = tf.parent;
@@ -1883,6 +1916,52 @@ namespace pxsim {
             }
 
             return true;
+        }
+
+        // DELETE BEFORE PR
+        private setupCheckpointIndicator() {
+            if (typeof window === "undefined" || typeof document === "undefined") return;
+
+            // Clear any previously running indicator from a killed runtime
+            if ((window as any).__cpIndicatorTimer) {
+                clearInterval((window as any).__cpIndicatorTimer);
+            }
+
+            (window as any).__canCheckpoint = () => this.canCheckpoint();
+            (window as any).__runtime = this;
+
+            (window as any).__cpIndicatorTimer = setInterval(() => {
+                if (!document.body || this.dead) return;
+
+                let el = document.getElementById("cp-indicator");
+                if (!el) {
+                    el = document.createElement("div");
+                    el.id = "cp-indicator";
+                    el.style.cssText = [
+                        "position: fixed !important",
+                        "top: 10px !important",
+                        "right: 10px !important",
+                        "z-index: 2147483647 !important",
+                        "padding: 6px 12px !important",
+                        "font-size: 12px !important",
+                        "font-family: monospace !important",
+                        "font-weight: bold !important",
+                        "border-radius: 4px !important",
+                        "pointer-events: none !important",
+                        "box-shadow: 0 2px 6px rgba(0,0,0,0.4) !important",
+                        "display: block !important",
+                        "visibility: visible !important",
+                        "opacity: 1 !important"
+                    ].join(";");
+                    document.body.appendChild(el);
+                }
+
+                const safe = this.canCheckpoint();
+
+                el.textContent = `CP SAFE: ${safe ? "YES" : "NO"} | yld: ${this.yielding} | run: ${this.running}`;
+                el.style.backgroundColor = safe ? "#107c10" : "#d83b01";
+                el.style.color = "#ffffff";
+            }, 100);
         }
     }
 
