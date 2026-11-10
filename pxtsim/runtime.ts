@@ -1839,21 +1839,19 @@ namespace pxsim {
             }, 66) as any
         }
 
-        /**
-         * Determines whether the simulator is currently resting at a deterministic safe point[cite: 2, 4].
-         */
+        // determines whether runtime is at a deterministic checkpoint.
         public canCheckpoint(): boolean {
-            // 1. Runtime must not be destroyed or terminated[cite: 4]
+            // runtime must not be terminated
             if (this.dead) {
                 return false;
             }
 
-            // 2. Reject if the synchronous evaluation loop is actively executing instructions[cite: 4]
+            // reject if actively computing
             if (this.yielding === false) {
                 return false;
             }
 
-            // 3. Reject if execution lock is held OR callbacks are queued
+            // reject if execution lock is held
             if (this.loopLock != null) {
                 return false;
             }
@@ -1861,12 +1859,12 @@ namespace pxsim {
                 return false;
             }
 
-            // 4. Reject if execution is paused inside an unmanaged native JS callback[cite: 2]
+            // reject if execution is paused inside an unmanaged native JS callback
             if (this.hasResume && this.hasResume()) {
                 return false;
             }
 
-            // 5. Inspect every active and scheduled stack frame continuation[cite: 2, 4]
+            // inspect every active and scheduled stack frame continuation
             const threads = this.getThreads();
             for (const topFrame of threads) {
                 if (!this.isFrameChainSafe(topFrame)) {
@@ -1877,25 +1875,23 @@ namespace pxsim {
             return true;
         }
 
-        /**
-         * Validates that every stack frame down the continuation chain is a pure simulator-managed state[cite: 2, 4].
-         */
+        // validates that every stack frame down the continuation chain is a pure simulator-managed state
         private isFrameChainSafe(topFrame: StackFrame): boolean {
             let frame: StackFrame | null = topFrame;
 
             while (frame) {
-                // Must have a valid, non-negative program counter[cite: 2, 4]
+                // must have a valid, non-negative program counter
                 if (typeof frame.pc !== "number" || frame.pc < 0) {
                     return false;
                 }
 
-                // Function must be a valid executable function[cite: 2, 4]
+                // function must be a valid executable function
                 const fn = frame.fn as any;
                 if (!fn || typeof fn !== "function") {
                     return false;
                 }
 
-                // If compiler symbol identifiers are present, ensure they match expected types[cite: 2, 4]
+                // if compiler symbol identifiers are present, ensure they match expected types
                 if (fn.fnId !== undefined && typeof fn.fnId !== "number") {
                     return false;
                 }
@@ -1903,7 +1899,7 @@ namespace pxsim {
                     return false;
                 }
 
-                // Validate all exception handlers in the try/catch hierarchy[cite: 2, 4]
+                // validate all exception handlers and their heirarchy
                 let tf: any = frame.tryFrame;
                 while (tf) {
                     if (typeof tf.handlerPC !== "number" || tf.handlerPC < 0) {
