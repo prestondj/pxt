@@ -1451,7 +1451,7 @@ namespace pxsim {
                 __this.perfStartRuntime()
                 removeFrame(p)
 
-                // mark tuntime as actively executing frames
+                // mark runtime as actively executing frames
                 __this.yielding = false;
                 try {
                     runtime = __this

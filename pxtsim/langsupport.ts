@@ -57,6 +57,18 @@ namespace pxsim {
         title = t;
     }
 
+    // dto for distinguishing primitives from pointers in the heap
+    export type EncodedValue =
+    | { type: "primitive"; value: number | string | boolean | null | undefined }
+    | { type: "ref"; id: number }
+    | { type: "static"; key: string };
+
+    // base dto for all seralised heap allocations
+    export interface EncodedObject {
+        id: number; // stable snapshot-local id
+        type: string; // literal "RefRecord", "RefCollection", "RefBuffer", "RefAction", "RefMap"
+    }
+
     export class RefObject {
         id: number;
 
@@ -85,6 +97,16 @@ namespace pxsim {
         // render a debug preview string
         toDebugString(): string {
             return "(object)";
+        }
+
+        // gives a typed data representation of the object
+        encode(snapshotID: number, encodeValue: (v: any) => EncodedValue): EncodedObject {
+            throw U.userError("encode not implemented");
+        }
+
+        // populates a field and reconnects cyclic references. called after objects have been instantiated.
+        decode(dto: EncodedObject, resolveRef: (id: number) => any): void{
+            U.userError("decode not implemented");
         }
 
         static toAny(o: any): any {
