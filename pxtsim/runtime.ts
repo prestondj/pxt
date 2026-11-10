@@ -813,6 +813,7 @@ namespace pxsim {
 
         dead = false;
         running = false;
+        yielding: boolean = false;
         idleTimer: any = undefined;
         recording = false;
         recordingTimer: any = 0;
@@ -1443,6 +1444,9 @@ namespace pxsim {
                 U.assert(!__this.loopLock)
                 __this.perfStartRuntime()
                 removeFrame(p)
+
+                // mark tuntime as actively executing frames
+                __this.yielding = false;
                 try {
                     runtime = __this
                     while (!!p) {
@@ -1455,7 +1459,12 @@ namespace pxsim {
                             p = __this.currFrame
                     }
                     __this.perfStopRuntime()
+
+                    // fiber completed naturally, mark as yielded
+                    __this.yielding = true;
                 } catch (e) {
+                    __this.yielding = true;
+                    
                     if (e instanceof BreakLoopException) {
                         U.nextTick(loopForSchedule(__this.currFrame))
                         return
@@ -1820,6 +1829,60 @@ namespace pxsim {
                     } as SimulatorAutomaticThumbnailMessage)
                 }
             }, 66) as any
+        }
+
+        public canCheckpoint(): boolean {
+            // firstly, the simulator must be initialized and active
+            if (this.dead || !this.running){
+                return false;
+            }
+
+            // secondly, cannoy checkpoint while evaluating synchronous steps inside the loop
+            // new attribute added to runtime, tracked inside of loop()
+            if (this.yielding === false){
+                return false;
+            }
+
+            // thirdly, we inspect every active / scheduled stack frame across runtime
+            // we do this using isFrameChainSafe
+            const threads = this.getThreads();
+            for (const topFrame of threads){
+                if (!this.isFrameChainSafe(topFrame)){
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private isFrameChainSafe(topFrame: StackFrame): boolean {
+            let frame: StackFrame | null = topFrame;
+
+            while(frame){
+                // must have a valid, non-negative pc
+                if(typeof frame.pc !== "number" || frame.pc < 0){
+                    return false;
+                }
+
+                // function reference must have a resolvable identifier (fnId // symbol name)
+                const fn = frame.fn as any;
+                if (!fn || (typeof fn.fnId !== "number" && typeof fn.symbol !== "string")){
+                    return false;
+                }
+
+                // validate entire try/catch heirarchy (if present)
+                let tf: any = frame.tryFrame;
+                while (tf){
+                    if(typeof tf.handlerPC !== "number" || tf.handlerPC < 0){
+                        return false;
+                    }
+                    tf = tf.parent;
+                }
+
+                frame = frame.parent;
+            }
+
+            return true;
         }
     }
 
