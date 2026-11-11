@@ -69,6 +69,13 @@ namespace pxsim {
         type: string; // literal "RefRecord", "RefCollection", "RefBuffer", "RefAction", "RefMap"
     }
 
+    // dto for encoded records
+    export interface EncodedRecord extends EncodedObject{
+        type: "RefRecord";
+        vtableKey: string;
+        fields: { [key: string]: EncodedValue }
+    }
+
     export class RefObject {
         id: number;
 
@@ -187,6 +194,26 @@ namespace pxsim {
             }
             return s + "}";
         }
+        
+        // serialise this class instance
+        encode(snapshotID: number, encodeValue: (v: any) => EncodedValue): EncodedRecord{
+            const dto: EncodedRecord = {
+                id: snapshotID,
+                type: "RefRecord",
+                vtableKey: this.vtable.name,
+                fields: {}
+            };
+
+            for (const key of Object.keys(this.fields)){
+                dto.fields[key] = encodeValue(this.fields[key]);
+            }
+
+            return dto;
+        }
+
+        
+
+        decode()
 
         toAny(): any {
             const r: any = {};
