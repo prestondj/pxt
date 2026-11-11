@@ -76,6 +76,14 @@ namespace pxsim {
         fields: { [key: string]: EncodedValue }
     }
 
+    // dto for encoded actions (closures)
+    export interface EncodedAction extends EncodedObject {
+        type: "RefAction";
+        funcKey: string;
+        len: number;
+        fields: EncodedValue[];
+    }
+
     export class RefObject {
         id: number;
 
@@ -196,7 +204,7 @@ namespace pxsim {
         }
         
         // serialise this class instance
-        encode(snapshotID: number, encodeValue: (v: any) => EncodedValue): EncodedRecord{
+        public encode(snapshotID: number, encodeValue: (v: any) => EncodedValue): EncodedRecord{
             const dto: EncodedRecord = {
                 id: snapshotID,
                 type: "RefRecord",
@@ -211,9 +219,28 @@ namespace pxsim {
             return dto;
         }
 
-        
 
-        decode()
+        public decode(dto: EncodedObject, resolveRef: (id: number) => any): void {
+            const recordDto = dto as EncodedRecord;
+
+            // note that assignment will be handled in a seperate allocation pass
+            // done by looking up recordDto.vtableKey in global vtables list
+
+            for (const key of Object.keys(recordDto.fields)){
+                const encodedVal = recordDto.fields[key];
+
+                if(encodedVal.type === "primitive"){
+                    this.fields[key] = encodedVal.value;
+                }
+                else if (encodedVal.type === "ref"){
+                    this.fields[key] = resolveRef(encodedVal.id);
+                }
+                else if (encodedVal.type === "static"){
+                    // handled seperatelty - linked against static binary image.
+                    this.fields[key] = runtime.globals[encodedVal.key];
+                }
+            }
+        }
 
         toAny(): any {
             const r: any = {};
@@ -254,6 +281,38 @@ namespace pxsim {
             n >>= 2;
             check(0 <= n && n < this.fields.length)
             return this.fields[n]
+        }
+
+        // serialise this closure environment
+        public encode(snapshotID: number, encodeValue: (v: any) => EncodedValue): EncodedAction{
+            return{
+                id: snapshotID,
+                type: "RefAction",
+                funcKey: pxsim.functionName(this.func),
+                len: this.len,
+                fields: this.fields.map(f => encodeValue(f))
+            };
+        }
+
+        // populate closure variables
+        public decode(dto: EncodedObject, resolveRef: (id: number) => any): void {
+            const actionDto = dto as EncodedAction;
+            
+            // assignment again is handled externally
+            this.len = actionDto.len;
+            this.fields = [];
+
+            for (const encodedVal of actionDto.fields) {
+                if (encodedVal === null || encodedVal === undefined) {
+                    this.fields.push(null);
+                } else if (encodedVal.type === "primitive") {
+                    this.fields.push(encodedVal.value);
+                } else if (encodedVal.type === "ref") {
+                    this.fields.push(resolveRef(encodedVal.id));
+                } else if (encodedVal.type === "static") {
+                    this.fields.push(runtime.globals[encodedVal.key]);
+                }
+            }
         }
 
         destroy() {
