@@ -84,6 +84,18 @@ namespace pxsim {
         fields: EncodedValue[];
     }
 
+    // dto for captured local variables
+    export interface EncodedRefLocal extends EncodedObject {
+        type: "RefRefLocal";
+        v: EncodedValue;
+    }
+
+    // dto for map/dictionary objects
+    export interface EncodedMap extends EncodedObject {
+        type: "RefMap";
+        data: { key: string, val: EncodedValue }[];
+    }
+
     export class RefObject {
         id: number;
 
@@ -447,6 +459,28 @@ namespace pxsim {
             if (runtime && runtime.refCountingDebug)
                 pxsim.log(`RefRefLocal id:${this.id} v:${this.v}`)
         }
+
+        public encode(snapshotID: number, encodeValue: (v: any) => EncodedValue): EncodedRefLocal {
+            return {
+                id: snapshotID,
+                type: "RefRefLocal",
+                v: encodeValue(this.v)
+            };
+        }
+
+        public decode(dto: EncodedObject, resolveRef: (id: number) => any): void {
+            const localDto = dto as EncodedRefLocal;
+            
+            if (localDto.v === null || localDto.v === undefined) {
+                this.v = localDto.v; // handles null/undefined
+            } else if (localDto.v.type === "primitive") {
+                this.v = localDto.v.value;
+            } else if (localDto.v.type === "ref") {
+                this.v = resolveRef(localDto.v.id);
+            } else if (localDto.v.type === "static") {
+                this.v = runtime.globals[localDto.v.key];
+            }
+        }
     }
 
     export interface MapEntry {
@@ -495,6 +529,42 @@ namespace pxsim {
                 s += this.data[i].key + ": " + RefObject.toDebugString(this.data[i].val)
             }
             return s + "}";
+        }
+
+        public encode(snapshotID: number, encodeValue: (v: any) => EncodedValue): EncodedMap {
+            return {
+                id: snapshotID,
+                type: "RefMap",
+                data: this.data.map(entry => ({
+                    key: entry.key,
+                    val: encodeValue(entry.val)
+                }))
+            };
+        }
+
+        public decode(dto: EncodedObject, resolveRef: (id: number) => any): void {
+            const mapDto = dto as EncodedMap;
+            
+            this.data = [];
+            
+            for (const entry of mapDto.data) {
+                let resolvedVal: any = null;
+                
+                if (entry.val === null || entry.val === undefined) {
+                    resolvedVal = entry.val;
+                } else if (entry.val.type === "primitive") {
+                    resolvedVal = entry.val.value;
+                } else if (entry.val.type === "ref") {
+                    resolvedVal = resolveRef(entry.val.id);
+                } else if (entry.val.type === "static") {
+                    resolvedVal = runtime.globals[entry.val.key];
+                }
+                
+                this.data.push({
+                    key: entry.key,
+                    val: resolvedVal
+                });
+            }
         }
 
         toAny(): any {
