@@ -1,4 +1,9 @@
 namespace pxsim {
+    export interface EncodedCollection extends EncodedObject{
+        type: "RefCollection";
+        data: EncodedValue[];
+    }
+
     // A ref-counted collection of either primitive or ref-counted objects (String, Image,
     // user-defined record, another collection)
     export class RefCollection extends RefObject {
@@ -103,6 +108,33 @@ namespace pxsim {
 
         print() {
             //pxsim.log(`RefCollection id:${this.id} refs:${this.refcnt} len:${this.data.length} d0:${this.data[0]}`)
+        }
+
+        public encode(snapshotID: number, encodeValue: (v: any) => EncodedValue): EncodedCollection {
+            return {
+                id: snapshotID,
+                type: "RefCollection",
+                data: this.data.map(item => encodeValue(item))
+            };
+        }
+
+        public decode(dto: EncodedObject, resolveRef: (id: number) => any): void {
+            const collDto = dto as EncodedCollection;
+            
+            // Clear any existing data
+            this.data = [];
+            
+            for (const encodedVal of collDto.data) {
+                if (encodedVal === null || encodedVal === undefined) {
+                    this.data.push(encodedVal); // Handle raw null/undefined
+                } else if (encodedVal.type === "primitive") {
+                    this.data.push(encodedVal.value);
+                } else if (encodedVal.type === "ref") {
+                    this.data.push(resolveRef(encodedVal.id));
+                } else if (encodedVal.type === "static") {
+                    this.data.push(runtime.globals[encodedVal.key]); 
+                }
+            }
         }
     }
 
@@ -430,6 +462,11 @@ namespace pxsim {
         }
     }
 
+    export interface EncodedBuffer extends EncodedObject {
+        type: "RefBuffer";
+        isStatic: boolean;
+        data: number[]; // serialised uint8array
+    }
 
     export class RefBuffer extends RefObject {
         isStatic = false
@@ -451,6 +488,22 @@ namespace pxsim {
 
         toDebugString(): string {
             return BufferMethods.toHex(this);
+        }
+
+        public encode(snapshotID: number, encodeValue: (v: any) => EncodedValue): EncodedBuffer {
+            return {
+                id: snapshotID,
+                type: "RefBuffer",
+                isStatic: this.isStatic,
+                data: Array.from(this.data) // convert Uint8Array to standard number[]
+            };
+        }
+
+        public decode(dto: EncodedObject, resolveRef: (id: number) => any): void {
+            const bufDto = dto as EncodedBuffer;
+            
+            this.isStatic = bufDto.isStatic;
+            this.data = new Uint8Array(bufDto.data);
         }
     }
 
