@@ -59,9 +59,9 @@ namespace pxsim {
 
     // dto for distinguishing primitives from pointers in the heap
     export type EncodedValue =
-    | { type: "primitive"; value: number | string | boolean | null | undefined }
+    | { type: "primitive"; value: any }
     | { type: "ref"; id: number }
-    | { type: "static"; key: string };
+    | { type: "static"; domain: "globals" | "env"; key: string };
 
     // base dto for all seralised heap allocations
     export interface EncodedObject {
@@ -215,8 +215,7 @@ namespace pxsim {
             return s + "}";
         }
         
-        // serialise this class instance
-        public encode(snapshotID: number, encodeValue: (v: any) => EncodedValue): EncodedRecord{
+        public encode(snapshotID: number, encodeValue: (v: any) => EncodedValue): EncodedRecord {
             const dto: EncodedRecord = {
                 id: snapshotID,
                 type: "RefRecord",
@@ -224,33 +223,25 @@ namespace pxsim {
                 fields: {}
             };
 
-            for (const key of Object.keys(this.fields)){
+            for (const key of Object.keys(this.fields)) {
                 dto.fields[key] = encodeValue(this.fields[key]);
             }
 
             return dto;
         }
 
-
+        // populates a field and reconnects cyclic references. called after objects have been instantiated.
         public decode(dto: EncodedObject, resolveRef: (id: number) => any): void {
             const recordDto = dto as EncodedRecord;
 
-            // note that assignment will be handled in a seperate allocation pass
-            // done by looking up recordDto.vtableKey in global vtables list
+            // Note: vtable assignment is handled in Pass 1 (Allocation)
+            // by looking up recordDto.vtableKey in the global vtables list.
 
-            for (const key of Object.keys(recordDto.fields)){
-                const encodedVal = recordDto.fields[key];
-
-                if(encodedVal.type === "primitive"){
-                    this.fields[key] = encodedVal.value;
-                }
-                else if (encodedVal.type === "ref"){
-                    this.fields[key] = resolveRef(encodedVal.id);
-                }
-                else if (encodedVal.type === "static"){
-                    // handled seperatelty - linked against static binary image.
-                    this.fields[key] = runtime.globals[encodedVal.key];
-                }
+            this.fields = {}; // Wipe any existing state before repopulating
+            
+            for (const key of Object.keys(recordDto.fields)) {
+                // rely entirely on the centralized decoder to handle primitives, refs, and statics
+                this.fields[key] = pxsim.decodeValue(recordDto.fields[key], resolveRef);
             }
         }
 
@@ -295,9 +286,8 @@ namespace pxsim {
             return this.fields[n]
         }
 
-        // serialise this closure environment
-        public encode(snapshotID: number, encodeValue: (v: any) => EncodedValue): EncodedAction{
-            return{
+        public encode(snapshotID: number, encodeValue: (v: any) => EncodedValue): EncodedAction {
+            return {
                 id: snapshotID,
                 type: "RefAction",
                 funcKey: pxsim.functionName(this.func),
@@ -310,21 +300,12 @@ namespace pxsim {
         public decode(dto: EncodedObject, resolveRef: (id: number) => any): void {
             const actionDto = dto as EncodedAction;
             
-            // assignment again is handled externally
+            // Note: this.func assignment is handled externally in Pass 1 (Allocation)
+            // by looking up actionDto.funcKey against the compiled program image.
             this.len = actionDto.len;
-            this.fields = [];
-
-            for (const encodedVal of actionDto.fields) {
-                if (encodedVal === null || encodedVal === undefined) {
-                    this.fields.push(null);
-                } else if (encodedVal.type === "primitive") {
-                    this.fields.push(encodedVal.value);
-                } else if (encodedVal.type === "ref") {
-                    this.fields.push(resolveRef(encodedVal.id));
-                } else if (encodedVal.type === "static") {
-                    this.fields.push(runtime.globals[encodedVal.key]);
-                }
-            }
+            
+            // reconstruct captured environment using the centralized decoder
+            this.fields = actionDto.fields.map(encodedVal => pxsim.decodeValue(encodedVal, resolveRef));
         }
 
         destroy() {
@@ -471,15 +452,8 @@ namespace pxsim {
         public decode(dto: EncodedObject, resolveRef: (id: number) => any): void {
             const localDto = dto as EncodedRefLocal;
             
-            if (localDto.v === null || localDto.v === undefined) {
-                this.v = localDto.v; // handles null/undefined
-            } else if (localDto.v.type === "primitive") {
-                this.v = localDto.v.value;
-            } else if (localDto.v.type === "ref") {
-                this.v = resolveRef(localDto.v.id);
-            } else if (localDto.v.type === "static") {
-                this.v = runtime.globals[localDto.v.key];
-            }
+            // This handles primitives, refs, nulls, and both types of statics automatically
+            this.v = pxsim.decodeValue(localDto.v, resolveRef); 
         }
     }
 
@@ -545,26 +519,11 @@ namespace pxsim {
         public decode(dto: EncodedObject, resolveRef: (id: number) => any): void {
             const mapDto = dto as EncodedMap;
             
-            this.data = [];
-            
-            for (const entry of mapDto.data) {
-                let resolvedVal: any = null;
-                
-                if (entry.val === null || entry.val === undefined) {
-                    resolvedVal = entry.val;
-                } else if (entry.val.type === "primitive") {
-                    resolvedVal = entry.val.value;
-                } else if (entry.val.type === "ref") {
-                    resolvedVal = resolveRef(entry.val.id);
-                } else if (entry.val.type === "static") {
-                    resolvedVal = runtime.globals[entry.val.key];
-                }
-                
-                this.data.push({
-                    key: entry.key,
-                    val: resolvedVal
-                });
-            }
+            // Wipe and reconstruct the map entries using the 1-line helper
+            this.data = mapDto.data.map(entry => ({
+                key: entry.key,
+                val: pxsim.decodeValue(entry.val, resolveRef)
+            }));
         }
 
         toAny(): any {
