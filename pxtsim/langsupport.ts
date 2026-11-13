@@ -66,7 +66,7 @@ namespace pxsim {
     // base dto for all seralised heap allocations
     export interface EncodedObject {
         id: number; // stable snapshot-local id
-        type: string; // literal "RefRecord", "RefCollection", "RefBuffer", "RefAction", "RefMap"
+        type: string; // string literal
     }
 
     // dto for encoded records

@@ -1891,12 +1891,12 @@ namespace pxsim {
                     return false;
                 }
 
-                // if compiler symbol identifiers are present, ensure they match expected types
-                if (fn.fnId !== undefined && typeof fn.fnId !== "number") {
-                    return false;
-                }
-                if (fn.symbol !== undefined && typeof fn.symbol !== "string") {
-                    return false;
+                // the function must have a stable compile-time identifier for serialization.
+                const hasValidFnId = typeof fn.fnId === "number";
+                const hasValidSymbol = typeof fn.symbol === "string";
+
+                if (!hasValidFnId && !hasValidSymbol) {
+                    return false; // reject: no stable identifier to look up during restore
                 }
 
                 // validate all exception handlers and their heirarchy
