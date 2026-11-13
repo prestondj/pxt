@@ -127,12 +127,12 @@ namespace pxsim {
         }
 
         // gives a typed data representation of the object
-        encode(snapshotID: number, encodeValue: (v: any) => EncodedValue): EncodedObject {
+        public encode(snapshotID: number, encodeValue: (v: any) => EncodedValue): EncodedObject {
             throw U.userError("encode not implemented");
         }
 
         // populates a field and reconnects cyclic references. called after objects have been instantiated.
-        decode(dto: EncodedObject, resolveRef: (id: number) => any): void{
+        public decode(dto: EncodedObject, resolveRef: (id: number) => any): void{
             U.userError("decode not implemented");
         }
 
