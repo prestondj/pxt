@@ -121,20 +121,8 @@ namespace pxsim {
         public decode(dto: EncodedObject, resolveRef: (id: number) => any): void {
             const collDto = dto as EncodedCollection;
             
-            // Clear any existing data
-            this.data = [];
-            
-            for (const encodedVal of collDto.data) {
-                if (encodedVal === null || encodedVal === undefined) {
-                    this.data.push(encodedVal); // Handle raw null/undefined
-                } else if (encodedVal.type === "primitive") {
-                    this.data.push(encodedVal.value);
-                } else if (encodedVal.type === "ref") {
-                    this.data.push(resolveRef(encodedVal.id));
-                } else if (encodedVal.type === "static") {
-                    this.data.push(runtime.globals[encodedVal.key]); 
-                }
-            }
+            // clear and reconstruct the dynamic array using the 1-line helper
+            this.data = collDto.data.map(encodedVal => pxsim.decodeValue(encodedVal, resolveRef));
         }
     }
 
